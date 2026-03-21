@@ -56,6 +56,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "You can also ask:\n"
         "`how much did I spend this week?`\n"
         "`summary this month`\n"
+        "`set food budget 5000`\n"
+        "`show my budgets`\n"
         "`undo`"
     )
     await update.effective_message.reply_text(message, parse_mode="Markdown")
@@ -67,9 +69,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     message = (
         "I track expenses in PHP by default.\n"
         f"Categories I use: {categories}.\n\n"
+        "You can also set budgets like `food budget 5000` or `monthly budget 12000`.\n\n"
         "If your message is unclear, I’ll ask a quick follow-up instead of saving bad data."
     )
-    await update.effective_message.reply_text(message)
+    await update.effective_message.reply_text(message, parse_mode="Markdown")
 
 
 async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -172,6 +175,9 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"{saved['item']} for {format_money(saved['amount'], saved['currency'])} "
             f"under {saved['category']}."
         )
+        alerts = db.get_budget_alerts_to_send(user.id, period="month", now=datetime.now(timezone.utc))
+        for alert in alerts:
+            await message.reply_text(format_budget_alert_message(alert))
         return
 
     if intent == "summary":
@@ -185,6 +191,42 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await message.reply_text(format_summary_message(summary))
         return
 
+    if intent == "budget_set":
+        amount = parsed.get("amount")
+        if amount is None or amount <= 0:
+            await message.reply_text(
+                "Please send a budget amount, like `food budget 5000` or `monthly budget 12000`.",
+                parse_mode="Markdown",
+            )
+            return
+
+        budget = db.upsert_budget(
+            telegram_user_id=user.id,
+            amount=amount,
+            category=parsed.get("category"),
+            period=parsed.get("period") or "month",
+            currency=parsed.get("currency") or "PHP",
+        )
+        db.log_event(
+            user.id,
+            "budget_set",
+            message_text=text,
+            metadata={"category": budget["category"], "amount": float(budget["amount"])},
+        )
+        await message.reply_text(format_budget_saved_message(budget))
+        return
+
+    if intent == "budget_show":
+        statuses = db.get_budget_statuses(user.id, period=parsed.get("period") or "month", now=datetime.now(timezone.utc))
+        db.log_event(
+            user.id,
+            "budget_viewed",
+            message_text=text,
+            metadata={"period": parsed.get("period") or "month"},
+        )
+        await message.reply_text(format_budget_status_message(statuses))
+        return
+
     if intent == "undo":
         db.log_event(user.id, "undo_requested", message_text=text)
         await undo_command(update, context)
@@ -192,7 +234,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     db.log_event(user.id, "unknown_message", message_text=text)
     await message.reply_text(
-        "I can help track expenses and show summaries. Try `snacks 85`, `grab to work 180`, or ask `how much did I spend this week?`"
+        "I can track expenses, budgets, and summaries. Try `snacks 85`, `set food budget 5000`, or ask `how much did I spend this week?`"
     )
 
 
@@ -322,3 +364,38 @@ def format_stats_message(stats: dict) -> str:
             lines.append(f"- {label} ({user['telegram_user_id']})")
 
     return "\n".join(lines)
+
+
+def format_budget_saved_message(budget: dict) -> str:
+    category = None if budget["category"] == "__overall__" else budget["category"]
+    label = f"{category} budget" if category else "overall monthly budget"
+    return f"Saved. Your {label} is now {format_money(budget['amount'], budget['currency'])}."
+
+
+def format_budget_status_message(statuses: list[dict]) -> str:
+    if not statuses:
+        return "You have no monthly budgets yet. Try `set food budget 5000` or `monthly budget 12000`."
+
+    lines = ["Your monthly budgets"]
+    for status in statuses:
+        label = status["category"] or "overall"
+        lines.append(
+            f"- {label}: {format_money(status['spent'], status['currency'])} used of "
+            f"{format_money(status['budget_amount'], status['currency'])} "
+            f"({status['percent_used']:.1f}%), remaining {format_money(status['remaining'], status['currency'])}"
+        )
+    return "\n".join(lines)
+
+
+def format_budget_alert_message(alert: dict) -> str:
+    label = alert["category"] or "overall"
+    if alert["next_alert_state"] == "80":
+        return (
+            f"Budget alert: you’ve used {alert['percent_used']:.1f}% of your {label} budget this month. "
+            f"You have {format_money(alert['remaining'], alert['currency'])} left."
+        )
+    return (
+        f"Budget alert: you’re now over your {label} budget for the month. "
+        f"Spent {format_money(alert['spent'], alert['currency'])} against "
+        f"{format_money(alert['budget_amount'], alert['currency'])}."
+    )

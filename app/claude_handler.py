@@ -37,6 +37,8 @@ class ClaudeHandler:
             Supported intents:
             - expense: a message describing money spent
             - summary: a request for totals, summaries, or reports
+            - budget_set: user wants to create or update a budget
+            - budget_show: user wants to view budgets or remaining budget
             - undo: user wants to remove the latest expense
             - unknown: not enough information or not finance-related
 
@@ -48,14 +50,16 @@ class ClaudeHandler:
             - Convert amount to a number only.
             - Use lowercase category names.
             - If the message is missing an amount or item, set needs_clarification to true.
-            - If the message is not an expense or summary request, use intent=unknown.
+            - If the message is not an expense, summary, or budget request, use intent=unknown.
             - For summary requests, set period to one of: today, week, month, last_month.
             - If summary period is unclear, default to month.
+            - For budget requests, use period=month unless the user clearly asks for something else.
+            - For overall budgets, set category to null.
             - Keep clarification_message short and helpful.
 
             Return this exact JSON shape:
             {
-              "intent": "expense|summary|undo|unknown",
+              "intent": "expense|summary|budget_set|budget_show|undo|unknown",
               "item": "string or null",
               "amount": 0,
               "category": "food|transport|groceries|bills|shopping|health|entertainment|other|null",
@@ -98,7 +102,7 @@ class ClaudeHandler:
             normalized_amount = None
 
         return {
-            "intent": intent if intent in {"expense", "summary", "undo", "unknown"} else "unknown",
+            "intent": intent if intent in {"expense", "summary", "budget_set", "budget_show", "undo", "unknown"} else "unknown",
             "item": self._clean_string(result.get("item")),
             "amount": normalized_amount,
             "category": normalized_category,

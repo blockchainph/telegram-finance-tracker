@@ -19,6 +19,7 @@ class Database:
         self.local_timezone = ZoneInfo(settings.timezone)
         self.users_table = "users"
         self.events_table = "events"
+        self.budgets_table = "budgets"
 
     def upsert_user(
         self,
@@ -73,6 +74,99 @@ class Database:
         }
         response = self.client.table(self.table_name).insert(payload).execute()
         return response.data[0]
+
+    def upsert_budget(
+        self,
+        telegram_user_id: int,
+        amount: float,
+        category: str | None = None,
+        period: str = "month",
+        currency: str = "PHP",
+    ) -> dict[str, Any]:
+        normalized_category = category or "__overall__"
+        payload = {
+            "telegram_user_id": telegram_user_id,
+            "category": normalized_category,
+            "amount": float(amount),
+            "period": period,
+            "currency": currency or "PHP",
+            "alert_state": "none",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        response = self.client.table(self.budgets_table).upsert(
+            payload,
+            on_conflict="telegram_user_id,category,period",
+        ).execute()
+        return response.data[0]
+
+    def get_budgets(self, telegram_user_id: int, period: str = "month") -> list[dict[str, Any]]:
+        response = (
+            self.client.table(self.budgets_table)
+            .select("*")
+            .eq("telegram_user_id", telegram_user_id)
+            .eq("period", period)
+            .order("category", desc=False)
+            .execute()
+        )
+        return response.data or []
+
+    def get_budget_statuses(
+        self,
+        telegram_user_id: int,
+        period: str = "month",
+        now: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        current = now or datetime.now(timezone.utc)
+        start_date, end_date, _ = self._resolve_period(period, current)
+        expenses = self.get_expenses_between(telegram_user_id, start_date, end_date)
+        budgets = self.get_budgets(telegram_user_id, period=period)
+        by_category = self._sum_by_category(expenses)
+        total_spend = sum(self._safe_amount(row.get("amount")) for row in expenses)
+
+        statuses: list[dict[str, Any]] = []
+        for budget in budgets:
+            category = None if budget["category"] == "__overall__" else budget["category"]
+            spent = total_spend if category is None else by_category.get(category, 0.0)
+            budget_amount = self._safe_amount(budget.get("amount"))
+            remaining = round(budget_amount - spent, 2)
+            percent_used = round((spent / budget_amount) * 100, 1) if budget_amount > 0 else 0.0
+            statuses.append(
+                {
+                    "category": category,
+                    "budget_amount": round(budget_amount, 2),
+                    "spent": round(spent, 2),
+                    "remaining": remaining,
+                    "percent_used": percent_used,
+                    "currency": budget.get("currency") or "PHP",
+                    "period": budget.get("period") or period,
+                    "alert_state": budget.get("alert_state") or "none",
+                }
+            )
+        return statuses
+
+    def get_budget_alerts_to_send(
+        self,
+        telegram_user_id: int,
+        period: str = "month",
+        now: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        alerts: list[dict[str, Any]] = []
+        statuses = self.get_budget_statuses(telegram_user_id, period=period, now=now)
+        for status in statuses:
+            next_alert_state = self._determine_alert_state(status["percent_used"])
+            current_alert_state = status["alert_state"]
+            if not next_alert_state or next_alert_state == current_alert_state:
+                continue
+
+            self._update_budget_alert_state(
+                telegram_user_id=telegram_user_id,
+                category=status["category"],
+                period=status["period"],
+                alert_state=next_alert_state,
+            )
+            status["next_alert_state"] = next_alert_state
+            alerts.append(status)
+        return alerts
 
     def get_last_expense(self, telegram_user_id: int) -> dict[str, Any] | None:
         response = (
@@ -308,6 +402,36 @@ class Database:
         month_start = month_start_local.astimezone(timezone.utc)
         month_end = (next_month_local - timedelta(seconds=1)).astimezone(timezone.utc)
         return month_start, month_end, local_target.strftime("%B %Y")
+
+    def _update_budget_alert_state(
+        self,
+        telegram_user_id: int,
+        category: str | None,
+        period: str,
+        alert_state: str,
+    ) -> None:
+        normalized_category = category or "__overall__"
+        (
+            self.client.table(self.budgets_table)
+            .update(
+                {
+                    "alert_state": alert_state,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            .eq("telegram_user_id", telegram_user_id)
+            .eq("category", normalized_category)
+            .eq("period", period)
+            .execute()
+        )
+
+    @staticmethod
+    def _determine_alert_state(percent_used: float) -> str | None:
+        if percent_used >= 100:
+            return "100"
+        if percent_used >= 80:
+            return "80"
+        return None
 
     def _sum_by_category(self, expenses: list[dict[str, Any]]) -> dict[str, float]:
         by_category: dict[str, float] = {}
