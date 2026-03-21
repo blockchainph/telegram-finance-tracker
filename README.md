@@ -155,7 +155,7 @@ If a message is unclear or missing details, Claude marks it for clarification an
 3. Choose `Deploy from GitHub repo`.
 4. Select the repository containing this bot.
 5. Add all environment variables from the previous section.
-6. Railway should detect Python automatically.
+6. Railway should detect Python automatically and use the pinned version in `runtime.txt`.
 7. Set the start command to:
 
    ```bash
