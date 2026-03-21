@@ -52,7 +52,6 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         scheduler.shutdown(wait=False)
-        await telegram_app.bot.delete_webhook(drop_pending_updates=False)
         await telegram_app.stop()
         await telegram_app.shutdown()
 
