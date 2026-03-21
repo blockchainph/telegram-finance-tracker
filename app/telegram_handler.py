@@ -146,7 +146,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     await message.reply_text(
-        "I can log expenses, undo the latest one, or show summaries. Try `snacks 85` or `how much did I spend this week?`"
+        "I can help track expenses and show summaries. Try `snacks 85`, `grab to work 180`, or ask `how much did I spend this week?`"
     )
 
 
