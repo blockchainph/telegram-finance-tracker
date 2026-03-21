@@ -19,6 +19,7 @@ class Settings:
     timezone: str
     monthly_summary_hour: int
     monthly_summary_minute: int
+    admin_telegram_user_ids: tuple[int, ...]
 
     @property
     def webhook_path(self) -> str:
@@ -32,6 +33,7 @@ class Settings:
 
 
 def get_settings() -> Settings:
+    admin_ids_raw = os.getenv("ADMIN_TELEGRAM_USER_IDS", "")
     return Settings(
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
@@ -43,4 +45,9 @@ def get_settings() -> Settings:
         timezone=os.getenv("TIMEZONE", "Asia/Manila"),
         monthly_summary_hour=int(os.getenv("MONTHLY_SUMMARY_HOUR", "21")),
         monthly_summary_minute=int(os.getenv("MONTHLY_SUMMARY_MINUTE", "0")),
+        admin_telegram_user_ids=tuple(
+            int(value.strip())
+            for value in admin_ids_raw.split(",")
+            if value.strip()
+        ),
     )

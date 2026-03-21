@@ -17,6 +17,42 @@ class Database:
         self.client: Client = create_client(settings.supabase_url, settings.supabase_key)
         self.table_name = "expenses"
         self.local_timezone = ZoneInfo(settings.timezone)
+        self.users_table = "users"
+        self.events_table = "events"
+
+    def upsert_user(
+        self,
+        telegram_user_id: int,
+        telegram_username: str | None,
+        first_name: str | None,
+        last_name: str | None,
+    ) -> None:
+        payload = {
+            "telegram_user_id": telegram_user_id,
+            "telegram_username": telegram_username,
+            "first_name": first_name,
+            "last_name": last_name,
+            "last_seen_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self.client.table(self.users_table).upsert(
+            payload,
+            on_conflict="telegram_user_id",
+        ).execute()
+
+    def log_event(
+        self,
+        telegram_user_id: int,
+        event_type: str,
+        message_text: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        payload = {
+            "telegram_user_id": telegram_user_id,
+            "event_type": event_type,
+            "message_text": message_text,
+            "metadata": metadata or {},
+        }
+        self.client.table(self.events_table).insert(payload).execute()
 
     def save_expense(
         self,
@@ -70,8 +106,60 @@ class Database:
         return response.data or []
 
     def get_all_user_ids(self) -> list[int]:
-        response = self.client.table(self.table_name).select("telegram_user_id").execute()
-        return sorted({row["telegram_user_id"] for row in response.data or []})
+        users_response = self.client.table(self.users_table).select("telegram_user_id").execute()
+        expenses_response = self.client.table(self.table_name).select("telegram_user_id").execute()
+        user_ids = {row["telegram_user_id"] for row in users_response.data or []}
+        user_ids.update({row["telegram_user_id"] for row in expenses_response.data or []})
+        return sorted(user_ids)
+
+    def get_usage_stats(self, now: datetime | None = None) -> dict[str, Any]:
+        current = now or datetime.now(timezone.utc)
+        week_start, _, _ = self._resolve_period("week", current)
+        month_start, _, _ = self._resolve_period("month", current)
+
+        users_response = self.client.table(self.users_table).select("*", count="exact").execute()
+        events_response = self.client.table(self.events_table).select("*", count="exact").execute()
+        active_week_response = (
+            self.client.table(self.users_table)
+            .select("telegram_user_id", count="exact")
+            .gte("last_seen_at", week_start.isoformat())
+            .execute()
+        )
+        active_month_response = (
+            self.client.table(self.users_table)
+            .select("telegram_user_id", count="exact")
+            .gte("last_seen_at", month_start.isoformat())
+            .execute()
+        )
+        event_breakdown_response = (
+            self.client.table(self.events_table)
+            .select("event_type")
+            .order("created_at", desc=True)
+            .limit(5000)
+            .execute()
+        )
+
+        event_counts: dict[str, int] = {}
+        for row in event_breakdown_response.data or []:
+            event_type = row.get("event_type", "unknown")
+            event_counts[event_type] = event_counts.get(event_type, 0) + 1
+
+        recent_users_response = (
+            self.client.table(self.users_table)
+            .select("telegram_user_id, telegram_username, first_name, last_seen_at")
+            .order("last_seen_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+
+        return {
+            "total_users": users_response.count or 0,
+            "total_events": events_response.count or 0,
+            "active_users_this_week": active_week_response.count or 0,
+            "active_users_this_month": active_month_response.count or 0,
+            "event_counts": event_counts,
+            "recent_users": recent_users_response.data or [],
+        }
 
     def get_period_summary(
         self,
