@@ -225,6 +225,9 @@ def format_summary_message(summary: dict) -> str:
         return f"You have no expenses recorded for {summary['label']} yet."
 
     currency = summary["currency"]
+    if summary.get("analytical"):
+        return format_analytical_monthly_summary(summary)
+
     lines = [
         f"Summary for {summary['label']}",
         f"Total: {format_money(summary['total'], currency)}",
@@ -247,6 +250,52 @@ def format_summary_message(summary: dict) -> str:
 def format_money(amount: float | int | str, currency: str) -> str:
     symbol = "₱" if (currency or "").upper() == "PHP" else f"{currency.upper()} "
     return f"{symbol}{float(amount):,.2f}"
+
+
+def format_analytical_monthly_summary(summary: dict) -> str:
+    currency = summary["currency"]
+    change = summary.get("change_vs_last_month")
+    change_text = "No last-month baseline yet"
+    if change is not None:
+        direction = "up" if change > 0 else "down"
+        change_text = f"{abs(change):.1f}% {direction} vs last month"
+    elif summary.get("previous_total", 0) == 0:
+        change_text = "First month with spending data"
+
+    lines = [
+        f"Monthly insight for {summary['label']}",
+        f"Total: {format_money(summary['total'], currency)} ({change_text})",
+        f"Entries: {summary['count']}",
+    ]
+
+    top_category = summary.get("top_category")
+    if top_category:
+        lines.append(
+            f"Top category: {top_category['name']} at {format_money(top_category['amount'], currency)} "
+            f"({top_category['percentage']:.1f}% of total)"
+        )
+
+    highest_day = summary.get("highest_spending_day")
+    if highest_day:
+        lines.append(
+            f"Highest spending day: {highest_day['label']} with {format_money(highest_day['amount'], currency)}"
+        )
+
+    lines.extend(
+        [
+            "",
+            "By category:",
+        ]
+    )
+
+    for category, amount in sorted(summary["by_category"].items(), key=lambda item: item[1], reverse=True):
+        lines.append(f"- {category}: {format_money(amount, currency)}")
+
+    insight = summary.get("insight")
+    if insight:
+        lines.extend(["", f"Insight: {insight}"])
+
+    return "\n".join(lines)
 
 
 def format_stats_message(stats: dict) -> str:
