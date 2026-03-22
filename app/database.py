@@ -20,6 +20,7 @@ class Database:
         self.users_table = "users"
         self.events_table = "events"
         self.budgets_table = "budgets"
+        self.merchant_rules_table = "merchant_rules"
 
     def upsert_user(
         self,
@@ -76,6 +77,43 @@ class Database:
         }
         response = self.client.table(self.table_name).insert(payload).execute()
         return response.data[0]
+
+    def upsert_merchant_rule(
+        self,
+        telegram_user_id: int,
+        store: str,
+        category: str,
+    ) -> dict[str, Any]:
+        normalized_store = store.strip().lower()
+        payload = {
+            "telegram_user_id": telegram_user_id,
+            "store": normalized_store,
+            "category": category,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        response = self.client.table(self.merchant_rules_table).upsert(
+            payload,
+            on_conflict="telegram_user_id,store",
+        ).execute()
+        return response.data[0]
+
+    def get_merchant_rule(
+        self,
+        telegram_user_id: int,
+        store: str | None,
+    ) -> dict[str, Any] | None:
+        if not store:
+            return None
+        normalized_store = store.strip().lower()
+        response = (
+            self.client.table(self.merchant_rules_table)
+            .select("*")
+            .eq("telegram_user_id", telegram_user_id)
+            .eq("store", normalized_store)
+            .limit(1)
+            .execute()
+        )
+        return response.data[0] if response.data else None
 
     def upsert_budget(
         self,

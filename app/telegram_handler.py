@@ -153,6 +153,9 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         item = parsed.get("item")
         store = parsed.get("store")
         category = parsed.get("category")
+        merchant_rule = db.get_merchant_rule(user.id, store)
+        if merchant_rule:
+            category = merchant_rule["category"]
         if amount is None or amount <= 0 or not item or not category:
             await message.reply_text("Please send the expense with an item and amount, like `coffee 120`.", parse_mode="Markdown")
             return
@@ -211,6 +214,30 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await message.reply_text(format_store_report_message(report))
         return
 
+    if intent == "merchant_rule_set":
+        store = parsed.get("store")
+        category = parsed.get("category")
+        if not store or not category:
+            await message.reply_text(
+                "Please tell me the store and category, like `Watsons should be health`.",
+                parse_mode="Markdown",
+            )
+            return
+
+        rule = db.upsert_merchant_rule(
+            telegram_user_id=user.id,
+            store=store,
+            category=category,
+        )
+        db.log_event(
+            user.id,
+            "merchant_rule_set",
+            message_text=text,
+            metadata={"store": rule["store"], "category": rule["category"]},
+        )
+        await message.reply_text(format_merchant_rule_message(rule))
+        return
+
     if intent == "budget_set":
         amount = parsed.get("amount")
         if amount is None or amount <= 0:
@@ -254,7 +281,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     db.log_event(user.id, "unknown_message", message_text=text)
     await message.reply_text(
-        "I can track expenses, budgets, and summaries. Try `snacks 85`, `set food budget 5000`, or ask `how much did I spend this week?`"
+        "I can track expenses, budgets, summaries, and learned store categories. Try `snacks 85`, `Watsons should be health`, or ask `how much did I spend this week?`"
     )
 
 
@@ -442,3 +469,7 @@ def format_store_report_message(report: dict) -> str:
     for store in report["stores"][:5]:
         lines.append(f"- {store['name']}: {format_money(store['amount'], currency)}")
     return "\n".join(lines)
+
+
+def format_merchant_rule_message(rule: dict) -> str:
+    return f"Got it. I’ll classify {rule['store']} as {rule['category']} for your future entries."
