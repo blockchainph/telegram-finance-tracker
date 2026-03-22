@@ -292,6 +292,44 @@ class Database:
             "expenses": expenses,
         }
 
+    def get_store_report(
+        self,
+        telegram_user_id: int,
+        period: str = "month",
+        category: str | None = None,
+        store: str | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        current = now or datetime.now(timezone.utc)
+        start_date, end_date, label = self._resolve_period(period, current)
+        expenses = self.get_expenses_between(telegram_user_id, start_date, end_date)
+
+        filtered = expenses
+        if category:
+            filtered = [expense for expense in filtered if expense.get("category") == category]
+        if store:
+            target = store.strip().lower()
+            filtered = [expense for expense in filtered if (expense.get("store") or "").strip().lower() == target]
+
+        by_store: dict[str, float] = {}
+        for expense in filtered:
+            store_name = expense.get("store") or "Unknown store"
+            by_store[store_name] = by_store.get(store_name, 0.0) + self._safe_amount(expense.get("amount"))
+
+        total = sum(self._safe_amount(row.get("amount")) for row in filtered)
+        sorted_stores = sorted(by_store.items(), key=lambda item: item[1], reverse=True)
+
+        return {
+            "label": label,
+            "period": period,
+            "category": category,
+            "store": store,
+            "currency": filtered[0]["currency"] if filtered else "PHP",
+            "total": round(total, 2),
+            "count": len(filtered),
+            "stores": [{"name": name, "amount": round(amount, 2)} for name, amount in sorted_stores],
+        }
+
     def get_analytical_monthly_summary(
         self,
         telegram_user_id: int,

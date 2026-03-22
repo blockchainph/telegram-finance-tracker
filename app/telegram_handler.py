@@ -194,6 +194,23 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await message.reply_text(format_summary_message(summary))
         return
 
+    if intent == "store_query":
+        report = db.get_store_report(
+            telegram_user_id=user.id,
+            period=parsed.get("period") or "month",
+            category=parsed.get("category"),
+            store=parsed.get("store"),
+            now=datetime.now(timezone.utc),
+        )
+        db.log_event(
+            user.id,
+            "store_query_requested",
+            message_text=text,
+            metadata={"period": parsed.get("period") or "month", "category": parsed.get("category"), "store": parsed.get("store")},
+        )
+        await message.reply_text(format_store_report_message(report))
+        return
+
     if intent == "budget_set":
         amount = parsed.get("amount")
         if amount is None or amount <= 0:
@@ -402,3 +419,26 @@ def format_budget_alert_message(alert: dict) -> str:
         f"Spent {format_money(alert['spent'], alert['currency'])} against "
         f"{format_money(alert['budget_amount'], alert['currency'])}."
     )
+
+
+def format_store_report_message(report: dict) -> str:
+    currency = report["currency"]
+    if report["store"]:
+        if report["count"] == 0:
+            return f"No spending found for {report['store']} in {report['label']}."
+        store_name = report["stores"][0]["name"] if report["stores"] else report["store"]
+        category_text = f" under {report['category']}" if report["category"] else ""
+        return (
+            f"You spent {format_money(report['total'], currency)} at {store_name}{category_text} in {report['label']} "
+            f"across {report['count']} entr{'y' if report['count'] == 1 else 'ies'}."
+        )
+
+    if not report["stores"]:
+        category_text = f" for {report['category']}" if report["category"] else ""
+        return f"No stores found{category_text} in {report['label']}."
+
+    category_text = f" for {report['category']}" if report["category"] else ""
+    lines = [f"Stores{category_text} in {report['label']}:"]
+    for store in report["stores"][:5]:
+        lines.append(f"- {store['name']}: {format_money(store['amount'], currency)}")
+    return "\n".join(lines)

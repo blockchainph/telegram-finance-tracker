@@ -37,6 +37,7 @@ class ClaudeHandler:
             Supported intents:
             - expense: a message describing money spent
             - summary: a request for totals, summaries, or reports
+            - store_query: user wants store-based spending answers
             - budget_set: user wants to create or update a budget
             - budget_show: user wants to view budgets or remaining budget
             - undo: user wants to remove the latest expense
@@ -52,14 +53,16 @@ class ClaudeHandler:
             - If the message is missing an amount or item, set needs_clarification to true.
             - If the message is not an expense, summary, or budget request, use intent=unknown.
             - For summary requests, set period to one of: today, week, month, last_month.
+            - For store queries, set period the same way as summary requests.
             - If summary period is unclear, default to month.
             - For budget requests, use period=month unless the user clearly asks for something else.
             - For overall budgets, set category to null.
+            - For store queries about a specific store, place the store name in the store field.
             - Keep clarification_message short and helpful.
 
             Return this exact JSON shape:
             {
-              "intent": "expense|summary|budget_set|budget_show|undo|unknown",
+              "intent": "expense|summary|store_query|budget_set|budget_show|undo|unknown",
               "item": "string or null",
               "store": "string or null",
               "amount": 0,
@@ -103,7 +106,7 @@ class ClaudeHandler:
             normalized_amount = None
 
         return {
-            "intent": intent if intent in {"expense", "summary", "budget_set", "budget_show", "undo", "unknown"} else "unknown",
+            "intent": intent if intent in {"expense", "summary", "store_query", "budget_set", "budget_show", "undo", "unknown"} else "unknown",
             "item": self._clean_string(result.get("item")),
             "store": self._clean_string(result.get("store")),
             "amount": normalized_amount,
