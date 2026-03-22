@@ -51,6 +51,7 @@ create table if not exists public.expenses (
   telegram_user_id bigint not null,
   telegram_username text,
   item text not null,
+  store text,
   amount numeric(12, 2) not null check (amount > 0),
   category text not null check (
     category in (
@@ -67,6 +68,9 @@ create table if not exists public.expenses (
   currency text not null default 'PHP',
   created_at timestamptz not null default timezone('utc', now())
 );
+
+alter table public.expenses
+  add column if not exists store text;
 
 create index if not exists expenses_telegram_user_id_idx
   on public.expenses (telegram_user_id);
@@ -192,6 +196,7 @@ Every non-command text message is sent to Claude, which returns JSON only. The b
 For expense messages, Claude extracts:
 
 - `item`
+- `store`
 - `amount`
 - `category`
 - `currency`
@@ -244,6 +249,7 @@ https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo
 - `lunch jollibee 150`
 - `grab to work 180 pesos`
 - `medicine watsons 320`
+- `snacks 7-eleven 95`
 - `how much did i spend this week?`
 - `summary this month`
 - `set food budget 5000`

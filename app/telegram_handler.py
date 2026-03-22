@@ -151,6 +151,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if intent == "expense":
         amount = parsed.get("amount")
         item = parsed.get("item")
+        store = parsed.get("store")
         category = parsed.get("category")
         if amount is None or amount <= 0 or not item or not category:
             await message.reply_text("Please send the expense with an item and amount, like `coffee 120`.", parse_mode="Markdown")
@@ -160,6 +161,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             telegram_user_id=user.id,
             telegram_username=user.username,
             item=item,
+            store=store,
             amount=amount,
             category=category,
             currency=parsed.get("currency") or "PHP",
@@ -168,11 +170,12 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             user.id,
             "expense_logged",
             message_text=text,
-            metadata={"category": saved["category"], "amount": float(saved["amount"])},
+            metadata={"category": saved["category"], "amount": float(saved["amount"]), "store": saved.get("store")},
         )
+        store_text = f" at {saved['store']}" if saved.get("store") else ""
         await message.reply_text(
             "Saved: "
-            f"{saved['item']} for {format_money(saved['amount'], saved['currency'])} "
+            f"{saved['item']}{store_text} for {format_money(saved['amount'], saved['currency'])} "
             f"under {saved['category']}."
         )
         alerts = db.get_budget_alerts_to_send(user.id, period="month", now=datetime.now(timezone.utc))

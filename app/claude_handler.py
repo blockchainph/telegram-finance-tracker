@@ -61,6 +61,7 @@ class ClaudeHandler:
             {
               "intent": "expense|summary|budget_set|budget_show|undo|unknown",
               "item": "string or null",
+              "store": "string or null",
               "amount": 0,
               "category": "food|transport|groceries|bills|shopping|health|entertainment|other|null",
               "currency": "PHP",
@@ -104,6 +105,7 @@ class ClaudeHandler:
         return {
             "intent": intent if intent in {"expense", "summary", "budget_set", "budget_show", "undo", "unknown"} else "unknown",
             "item": self._clean_string(result.get("item")),
+            "store": self._clean_string(result.get("store")),
             "amount": normalized_amount,
             "category": normalized_category,
             "currency": currency,
