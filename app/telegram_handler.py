@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 
 from telegram import BotCommand, Update
@@ -13,6 +14,11 @@ from app.database import Database
 
 
 logger = logging.getLogger(__name__)
+MERCHANT_RULE_PATTERNS = [
+    re.compile(r"^\s*(?P<store>.+?)\s+should\s+be\s+(?P<category>food|transport|groceries|bills|shopping|health|entertainment|other)\s*$", re.IGNORECASE),
+    re.compile(r"^\s*categorize\s+(?P<store>.+?)\s+as\s+(?P<category>food|transport|groceries|bills|shopping|health|entertainment|other)\s*$", re.IGNORECASE),
+    re.compile(r"^\s*set\s+(?P<store>.+?)\s+category\s+to\s+(?P<category>food|transport|groceries|bills|shopping|health|entertainment|other)\s*$", re.IGNORECASE),
+]
 
 
 def build_application(
@@ -129,13 +135,27 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await context.bot.send_chat_action(chat_id=message.chat_id, action=ChatAction.TYPING)
 
-    try:
-        parsed = await claude.parse_message(text)
-    except Exception:
-        logger.exception("Claude parsing failed")
-        db.log_event(user.id, "claude_parse_error", message_text=text)
-        await message.reply_text("I had trouble reading that. Please try again in a moment.")
-        return
+    merchant_rule_match = parse_merchant_rule_shortcut(text)
+    if merchant_rule_match:
+        parsed = {
+            "intent": "merchant_rule_set",
+            "item": None,
+            "store": merchant_rule_match["store"],
+            "amount": None,
+            "category": merchant_rule_match["category"],
+            "currency": "PHP",
+            "period": "month",
+            "needs_clarification": False,
+            "clarification_message": None,
+        }
+    else:
+        try:
+            parsed = await claude.parse_message(text)
+        except Exception:
+            logger.exception("Claude parsing failed")
+            db.log_event(user.id, "claude_parse_error", message_text=text)
+            await message.reply_text("I had trouble reading that. Please try again in a moment.")
+            return
 
     intent = parsed["intent"]
     if parsed["needs_clarification"]:
@@ -473,3 +493,14 @@ def format_store_report_message(report: dict) -> str:
 
 def format_merchant_rule_message(rule: dict) -> str:
     return f"Got it. I’ll classify {rule['store']} as {rule['category']} for your future entries."
+
+
+def parse_merchant_rule_shortcut(text: str) -> dict[str, str] | None:
+    for pattern in MERCHANT_RULE_PATTERNS:
+        match = pattern.match(text)
+        if match:
+            return {
+                "store": match.group("store").strip(),
+                "category": match.group("category").strip().lower(),
+            }
+    return None
